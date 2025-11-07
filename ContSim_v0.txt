@@ -1,0 +1,70 @@
+Sub DispatchTRFQBlocks_DryRun()
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("TRFQ")
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim i As Long, blockStart As Long
+    Dim currentBlock As String, previousBlock As String
+    Dim currentClient As String, previousClient As String
+    Dim folderPath As String: folderPath = "C:\Screenshots\"
+    Dim screenshotName As String, screenshotPath As String
+    Dim blockCcyPair As String, uniformCcyPair As Boolean
+    Dim timestamp As String: timestamp = Format(Now, "yyyymmdd_hhnnss")
+
+    previousBlock = ""
+    previousClient = ""
+
+    For i = 2 To lastRow
+        currentBlock = Trim(ws.Cells(i, "B").Value) ' Block
+        currentClient = Trim(ws.Cells(i, "A").Value) ' CIF
+
+        ' Detect new block
+        If currentBlock <> previousBlock Then
+            blockStart = i
+
+            ' Find block end
+            Dim j As Long: j = i
+            Do While j <= lastRow And Trim(ws.Cells(j, "B").Value) = currentBlock
+                j = j + 1
+            Loop
+            Dim blockEnd As Long: blockEnd = j - 1
+
+            ' Check if client changed
+            Dim selectClientFlag As Boolean: selectClientFlag = (currentClient <> previousClient)
+
+            ' Check if all CcyPairs in block are the same
+            blockCcyPair = ws.Cells(blockStart, "D").Value
+            uniformCcyPair = True
+            Dim k As Long
+            For k = blockStart + 1 To blockEnd
+                If ws.Cells(k, "D").Value <> blockCcyPair Then
+                    uniformCcyPair = False
+                    Exit For
+                End If
+            Next k
+
+            ' Build screenshot filename
+            If uniformCcyPair Then
+                screenshotName = currentClient & "_" & currentBlock & "_" & blockCcyPair & "_" & timestamp & ".png"
+            Else
+                screenshotName = currentClient & "_" & currentBlock & "_" & timestamp & ".png"
+            End If
+            screenshotPath = folderPath & screenshotName
+
+            ' Dry logger output
+            Debug.Print "Block: " & currentBlock
+            Debug.Print "Client: " & currentClient & " (SelectClient=" & selectClientFlag & ")"
+            Debug.Print "Rows: " & blockStart & " to " & blockEnd
+            Debug.Print "Uniform CcyPair: " & uniformCcyPair
+            Debug.Print "Screenshot: " & screenshotPath
+            Debug.Print "-----------------------------"
+
+            ' Update screenshot path for all rows in block
+            For k = blockStart To blockEnd
+                ws.Cells(k, "R").Value = screenshotPath ' Assuming column R holds screenshot path
+            Next k
+
+            ' Update previous values
+            previousBlock = currentBlock
+            previousClient = currentClient
+        End If
+    Next i
+End Sub
