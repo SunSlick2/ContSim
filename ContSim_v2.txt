@@ -1,0 +1,124 @@
+Sub DispatchTRFQBlocks_RunAutoIt()
+    Dim ws As Worksheet: Set ws = ThisWorkbook.Sheets("TRFQ")
+    Dim lastRow As Long: lastRow = ws.Cells(ws.Rows.Count, "A").End(xlUp).Row
+    Dim i As Long, blockStart As Long
+    Dim currentBlock As String, previousBlock As String
+    Dim currentClient As String, previousClient As String
+    Dim screenshotName As String, screenshotPath As String
+    Dim blockCcyPair As String, uniformCcyPair As Boolean
+    Dim timestamp As String: timestamp = Format(Now, "yyyymmdd_hhnnss")
+    
+    ' Dynamic log directory
+    Dim logFolder As String
+    logFolder = "C:\Users\" & Environ("Username") & "\Downloads\ContSim\"
+    Dim logFilePath As String: logFilePath = logFolder & "TRFQ_Log_" & timestamp & ".txt"
+    Dim logStream As Object: Set logStream = CreateObject("Scripting.FileSystemObject").CreateTextFile(logFilePath, True)
+
+    previousBlock = ""
+    previousClient = ""
+
+    For i = 2 To lastRow
+        currentBlock = Trim(ws.Cells(i, "B").Value)
+        currentClient = Trim(ws.Cells(i, "A").Value)
+
+        If currentBlock <> previousBlock Then
+            blockStart = i
+
+            ' Find block end
+            Dim j As Long: j = i
+            Do While j <= lastRow And Trim(ws.Cells(j, "B").Value) = currentBlock
+                j = j + 1
+            Loop
+            Dim blockEnd As Long: blockEnd = j - 1
+            Dim tradeCount As Long: tradeCount = blockEnd - blockStart + 1
+
+            ' Client selection flag
+            Dim selectClientFlag As Long: selectClientFlag = IIf(currentClient <> previousClient, 1, 0)
+
+            ' Check uniform CcyPair
+            blockCcyPair = ws.Cells(blockStart, "D").Value
+            uniformCcyPair = True
+            Dim k As Long
+            For k = blockStart + 1 To blockEnd
+                If ws.Cells(k, "D").Value <> blockCcyPair Then
+                    uniformCcyPair = False
+                    Exit For
+                End If
+            Next k
+
+            ' Build screenshot filename
+            If uniformCcyPair Then
+                screenshotName = currentClient & "_" & currentBlock & "_" & blockCcyPair & "_" & timestamp & ".png"
+            Else
+                screenshotName = currentClient & "_" & currentBlock & "_" & timestamp & ".png"
+            End If
+            screenshotPath = logFolder & screenshotName
+
+            ' Build trade strings with logic for XAU and FF date
+            Dim tradeArgs(1 To 3) As String
+            For k = 0 To tradeCount - 1
+                Dim rowIdx As Long: rowIdx = blockStart + k
+                Dim rawVals As Variant: rawVals = ws.Range("A" & rowIdx & ":Q" & rowIdx).Value
+                Dim ccyPrefix As String: ccyPrefix = UCase(Left(rawVals(1, 4), 3)) ' Column D
+
+                ' Notional logic
+                Dim notional As Double: notional = rawVals(1, 9)
+                Dim boosted As Double: boosted = rawVals(1, 10)
+                If ccyPrefix <> "XAU" Then
+                    notional = notional * 1000
+                    boosted = boosted * 1000
+                End If
+
+                ' FF date formatting
+                Dim ffDate As String
+                If IsDate(rawVals(1, 5)) Then
+                    ffDate = Format(rawVals(1, 5), "ddmmmyy")
+                Else
+                    ffDate = rawVals(1, 5)
+                End If
+
+                ' Build trade string
+                tradeArgs(k + 1) = rawVals(1, 1) & "|" & rawVals(1, 2) & "|" & rawVals(1, 3) & "|" & rawVals(1, 4) & "|" & _
+                                   ffDate & "|" & rawVals(1, 6) & "|" & rawVals(1, 7) & "|" & rawVals(1, 8) & "|" & _
+                                   notional & "|" & boosted & "|" & rawVals(1, 11) & "|" & rawVals(1, 12) & "|" & _
+                                   rawVals(1, 13) & "|" & rawVals(1, 14) & "|" & rawVals(1, 15) & "|" & rawVals(1, 16) & "|" & rawVals(1, 17)
+            Next k
+
+            ' Fill empty slots
+            For k = tradeCount + 1 To 3
+                tradeArgs(k) = ""
+            Next k
+
+            ' Build command
+            Dim cmd As String
+            cmd = "AutoIt3.exe C:\Path\To\TRFQ_AutoIt.au3 " & _
+                  tradeCount & " " & _
+                  selectClientFlag & " " & _
+                  Chr(34) & screenshotPath & Chr(34) & " " & _
+                  Chr(34) & tradeArgs(1) & Chr(34) & " " & _
+                  Chr(34) & tradeArgs(2) & Chr(34) & " " & _
+                  Chr(34) & tradeArgs(3) & Chr(34)
+
+            ' Log
+            logStream.WriteLine "Block: " & currentBlock
+            logStream.WriteLine "Client: " & currentClient & " (SelectClient=" & selectClientFlag & ")"
+            logStream.WriteLine "Screenshot: " & screenshotPath
+            logStream.WriteLine "Command: " & cmd
+            logStream.WriteLine String(40, "-")
+
+            ' Update screenshot path in column S
+            For k = blockStart To blockEnd
+                ws.Cells(k, "S").Value = screenshotPath
+            Next k
+
+            ' Launch AutoIt
+            Shell cmd, vbNormalFocus
+
+            previousBlock = currentBlock
+            previousClient = currentClient
+        End If
+    Next i
+
+    logStream.Close
+    MsgBox "Automation complete. Log saved to:" & vbCrLf & logFilePath, vbInformation
+End Sub
